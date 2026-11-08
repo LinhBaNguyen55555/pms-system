@@ -1,0 +1,255 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ==========================================
+// SPRINT 1: NỀN TẢNG PHÂN QUYỀN & CƠ CẤU NHÂN SỰ
+// ==========================================
+
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // HR, MANAGER, EMPLOYEE
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id           Int           @id @default(autoincrement())
+  username     String        @unique
+  password     String
+  roleId       Int
+  role         Role          @relation(fields: [roleId], references: [id])
+  employee     Employee?
+  approvalLogs ApprovalLog[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model Department {
+  id          Int        @id @default(autoincrement())
+  name        String
+  code        String     @unique
+  employees   Employee[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Position {
+  id          Int                 @id @default(autoincrement())
+  name        String
+  code        String              @unique
+  employees   Employee[]
+  templates   AppraisalTemplate[]
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+}
+
+model Employee {
+  id              Int                  @id @default(autoincrement())
+  code            String               @unique // Mã nhân viên (VD: NV0001, HR0001)
+  fullName        String
+  email           String               @unique
+  phone           String?
+  departmentId    Int
+  department      Department           @relation(fields: [departmentId], references: [id])
+  positionId      Int
+  position        Position             @relation(fields: [positionId], references: [id])
+  
+  // Phân cấp Quản lý trực tiếp (managerId)
+  managerId       Int?
+  manager         Employee?            @relation("ManagerSubordinates", fields: [managerId], references: [id])
+  subordinates    Employee[]           @relation("ManagerSubordinates")
+  
+  userId          Int?                 @unique
+  user            User?                @relation(fields: [userId], references: [id])
+  
+  goals           EmployeeGoal[]
+  evaluationForms EvaluationForm[]
+  feedbacks       EvaluationFeedback[]
+  
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+}
+
+// ==========================================
+// SPRINT 2: TIÊU CHÍ, MẪU PHIẾU & KỲ ĐÁNH GIÁ
+// ==========================================
+
+model Criterion {
+  id                Int                @id @default(autoincrement())
+  name              String
+  category          String             // KPI, NĂNG LỰC, THÁI ĐỘ
+  description       String?
+  behaviorGuide     String?            // Hướng dẫn mô tả hành vi các mức độ điểm (Rubric)
+  templateItems     TemplateItem[]
+  evaluationDetails EvaluationDetail[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+}
+
+model AppraisalTemplate {
+  id              Int              @id @default(autoincrement())
+  name            String
+  positionId      Int
+  position        Position         @relation(fields: [positionId], references: [id])
+  description     String?
+  totalWeight     Float            @default(100.0) // Ràng buộc tổng trọng số = 100%
+  items           TemplateItem[]
+  evaluationForms EvaluationForm[]
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model TemplateItem {
+  id          Int               @id @default(autoincrement())
+  templateId  Int
+  template    AppraisalTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  criterionId Int
+  criterion   Criterion         @relation(fields: [criterionId], references: [id])
+  weight      Float             // Tỷ lệ % trọng số tiêu chí
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model GradingScale {
+  id          Int      @id @default(autoincrement())
+  grade       String   @unique // Hạng A, B, C, D
+  minScore    Float    // Điểm tối thiểu (VD: 90.0)
+  maxScore    Float    // Điểm tối đa (VD: 100.0)
+  description String?  // Mô tả (Xuất sắc, Tốt, Hoàn thành, Chưa đạt)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AppraisalPeriod {
+  id                    Int              @id @default(autoincrement())
+  name                  String           // VD: Đánh giá Quý 1/2026
+  startDate             DateTime
+  endDate               DateTime
+  selfReviewDeadline    DateTime         // Hạn chót tự đánh giá
+  managerReviewDeadline DateTime         // Hạn chót Quản lý duyệt
+  status                String           @default("DRAFT") // DRAFT, OPEN, REVIEWING, CLOSED
+  goals                 EmployeeGoal[]
+  evaluationForms       EvaluationForm[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+}
+
+// ==========================================
+// SPRINT 3: LUỒNG CHẤM ĐIỂM, KPI & MINH CHỨNG
+// ==========================================
+
+model EmployeeGoal {
+  id              Int             @id @default(autoincrement())
+  employeeId      Int
+  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  periodId        Int
+  period          AppraisalPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  title           String          // Tiêu đề mục tiêu KPI đầu kỳ
+  description     String?
+  target          String?         // Chỉ tiêu cần đạt
+  status          String          @default("PENDING") // PENDING, APPROVED, REJECTED
+  managerFeedback String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+}
+
+model EvaluationForm {
+  id                Int                  @id @default(autoincrement())
+  employeeId        Int
+  employee          Employee             @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  periodId          Int
+  period            AppraisalPeriod      @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  templateId        Int
+  template          AppraisalTemplate    @relation(fields: [templateId], references: [id])
+  
+  selfTotalScore    Float?               // Tổng điểm nhân viên tự chấm
+  managerTotalScore Float?               // Tổng điểm Quản lý chấm
+  finalScore        Float?               // Điểm chốt chung cuộc
+  finalGrade        String?              // Xếp loại chính thức: A, B, C, D
+  status            String               @default("NOT_STARTED") // NOT_STARTED, DRAFT, SELF_SUBMITTED, MANAGER_REVIEWED, COMPLETED
+  managerNote       String?              // Nhận xét của Trưởng bộ phận
+  
+  details           EvaluationDetail[]
+  feedbacks         EvaluationFeedback[]
+  rewardProposals   RewardProposal[]
+  approvalLogs      ApprovalLog[]
+  
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@unique([employeeId, periodId])
+}
+
+model EvaluationDetail {
+  id           Int            @id @default(autoincrement())
+  formId       Int
+  form         EvaluationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  criterionId  Int
+  criterion    Criterion      @relation(fields: [criterionId], references: [id])
+  weight       Float          // Trọng số tiêu chí (%)
+  selfScore    Float?         // Điểm tự chấm
+  managerScore Float?         // Điểm Quản lý chấm
+  note         String?
+  evidences    Evidence[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Evidence {
+  id          Int              @id @default(autoincrement())
+  detailId    Int
+  detail      EvaluationDetail @relation(fields: [detailId], references: [id], onDelete: Cascade)
+  fileName    String
+  fileUrl     String           // Link tệp hoặc URL minh chứng
+  description String?
+  createdAt   DateTime         @default(now())
+}
+
+// ==========================================
+// SPRINT 4: THỐNG KÊ, ĐÃI NGỘ & AUDIT LOG
+// ==========================================
+
+model EvaluationFeedback {
+  id         Int            @id @default(autoincrement())
+  formId     Int
+  form       EvaluationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  employeeId Int
+  employee   Employee       @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  content    String         // Nội dung phản hồi / kiến nghị
+  status     String         @default("PENDING") // PENDING, RESOLVED, REJECTED
+  response   String?        // Phản hồi từ Hội đồng / Quản lý
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+}
+
+model RewardProposal {
+  id        Int            @id @default(autoincrement())
+  formId    Int
+  form      EvaluationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  type      String         // KHEN_THUONG, TANG_LUONG, DAO_TAO_LAI
+  reason    String?
+  status    String         @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model ApprovalLog {
+  id            Int            @id @default(autoincrement())
+  formId        Int
+  form          EvaluationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  action        String         // SELF_SUBMIT, MANAGER_EVALUATE, COUNCIL_APPROVE, APPEAL
+  actorId       Int
+  actor         User           @relation(fields: [actorId], references: [id])
+  previousState String?
+  newState      String
+  comment       String?
+  createdAt     DateTime       @default(now())
+}
